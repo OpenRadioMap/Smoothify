@@ -210,6 +210,7 @@ def _smoothify_geodataframe(
     merge_multipolygons: bool,
     preserve_area: bool,
     area_tolerance: float = 0.01,
+    merge_field: Optional[str] = None,
 ) -> gpd.GeoDataFrame:
     """Smooth all geometries in a GeoDataFrame with optional parallel processing.
 
@@ -221,7 +222,10 @@ def _smoothify_geodataframe(
 
     if merge_collection:
         modified_gdf.geometry = modified_gdf.buffer(segment_length / 1000)
-        modified_gdf = modified_gdf.dissolve()
+        modified_gdf = modified_gdf.dissolve(by=merge_field)
+        # Reset index to preserve the dissolve field as a column
+        if merge_field is not None:
+            modified_gdf = modified_gdf.reset_index()
         modified_gdf = modified_gdf.explode(index_parts=False, ignore_index=True)
 
     smoothify_partial = partial(

@@ -114,12 +114,24 @@ The `smoothify()` function accepts three types of input:
 ```python
 import geopandas as gpd
 from smoothify import smoothify
-
+# By default this will dissolve adjacent polygons before smoothing
 gdf = gpd.read_file("polygons.gpkg")
 smoothed_gdf = smoothify(
     geom=gdf,
     segment_length=10.0,
     smooth_iterations=3,
+    num_cores=4
+)
+
+# Dissolve geometries by a specific field before smoothing
+# Useful for merging adjacent polygons with the same classification
+gdf_with_classes = gpd.read_file("classified_polygons.gpkg")
+smoothed_by_class = smoothify(
+    geom=gdf_with_classes,
+    segment_length=10.0,
+    smooth_iterations=3,
+    merge_collection=True,
+    merge_field="land_type",  # Merge adjacent geometries with same land_type
     num_cores=4
 )
 ```
@@ -161,6 +173,7 @@ smoothed = smoothify(
 | `smooth_iterations` | int | 3 | Number of Chaikin corner-cutting iterations (typically 3-5). Higher values = smoother output with more vertices |
 | `num_cores` | int | 0 | Number of CPU cores for parallel processing (0 = all available cores, 1 = serial) |
 | `merge_collection` | bool | True | Whether to merge/dissolve adjacent geometries in collections before smoothing |
+| `merge_field` | str | None | **GeoDataFrame only**: Column name to use for dissolving geometries. Only valid when `merge_collection=True`. If None, dissolves all geometries together. If specified, dissolves geometries grouped by the column values |
 | `merge_multipolygons` | bool | True | Whether to merge adjacent polygons within MultiPolygons before smoothing |
 | `preserve_area` | bool | True | Whether to restore original area after smoothing via buffering (applies to Polygons only) |
 | `area_tolerance` | float | 0.01 | Percentage of original area allowed as error (e.g., 0.01 = 0.01% error = 99.99% preservation). Only affects Polygons when preserve_area=True |

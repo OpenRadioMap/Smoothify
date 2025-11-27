@@ -253,3 +253,108 @@ class TestSmoothifyAPI:
         with pytest.raises(ValueError):
             smoothify(geom="not a geometry", segment_length=1.0)  # type: ignore
 
+    def test_merge_field_with_geodataframe(self):
+        """Test merge_field parameter with GeoDataFrame."""
+        # Create adjacent polygons with different categories
+        poly1 = Polygon([(0, 0), (10, 0), (10, 10), (0, 10)])
+        poly2 = Polygon([(10, 0), (20, 0), (20, 10), (10, 10)])  # Adjacent to poly1
+        poly3 = Polygon([(0, 10), (10, 10), (10, 20), (0, 20)])  # Adjacent to poly1
+        poly4 = Polygon([(30, 0), (40, 0), (40, 10), (30, 10)])  # Separate
+
+        gdf = gpd.GeoDataFrame(
+            {"category": ["A", "A", "B", "B"]},
+            geometry=[poly1, poly2, poly3, poly4],
+            crs="EPSG:4326"
+        )
+
+        # Smooth with merge_field - should dissolve by category
+        smoothed = smoothify(
+            geom=gdf,
+            segment_length=1.0,
+            smooth_iterations=3,
+            merge_collection=True,
+            merge_field="category",
+            num_cores=1
+        )
+
+        assert isinstance(smoothed, gpd.GeoDataFrame)
+        assert all(geom.is_valid for geom in smoothed.geometry)
+        # After dissolving by category and exploding, we should have fewer or equal geometries
+        assert len(smoothed) <= len(gdf)
+
+    def test_merge_field_without_merge_collection_raises_error(self):
+        """Test that merge_field requires merge_collection=True."""
+        poly1 = Polygon([(0, 0), (5, 0), (5, 5), (0, 5)])
+        poly2 = Polygon([(10, 10), (15, 10), (15, 15), (10, 15)])
+        gdf = gpd.GeoDataFrame(
+            {"category": ["A", "B"]},
+            geometry=[poly1, poly2],
+            crs="EPSG:4326"
+        )
+
+        with pytest.raises(ValueError, match="merge_field is only supported when merge_collection is True"):
+            smoothify(
+                geom=gdf,
+                segment_length=1.0,
+                merge_collection=False,
+                merge_field="category",
+                num_cores=1
+            )
+
+    def test_merge_field_with_non_geodataframe_raises_error(self):
+        """Test that merge_field only works with GeoDataFrame."""
+        poly = Polygon([(0, 0), (5, 0), (5, 5), (0, 5)])
+
+        with pytest.raises(ValueError, match="merge_field is only supported for GeoDataFrames"):
+            smoothify(
+                geom=poly,
+                segment_length=1.0,
+                merge_field="category"  # type: ignore
+            )
+
+    def test_merge_field_with_invalid_column_raises_error(self):
+        """Test that merge_field must be a valid column name."""
+        poly1 = Polygon([(0, 0), (5, 0), (5, 5), (0, 5)])
+        poly2 = Polygon([(10, 10), (15, 10), (15, 15), (10, 15)])
+        gdf = gpd.GeoDataFrame(
+            {"category": ["A", "B"]},
+            geometry=[poly1, poly2],
+            crs="EPSG:4326"
+        )
+
+        with pytest.raises(ValueError, match="merge_field nonexistent not found in GeoDataFrame"):
+            smoothify(
+                geom=gdf,
+                segment_length=1.0,
+                merge_collection=True,
+                merge_field="nonexistent",
+                num_cores=1
+            )
+
+    def test_merge_field_none_with_geodataframe(self):
+        """Test that merge_field=None works correctly (dissolves all geometries)."""
+        poly1 = Polygon([(0, 0), (10, 0), (10, 10), (0, 10)])
+        poly2 = Polygon([(10, 0), (20, 0), (20, 10), (10, 10)])  # Adjacent to poly1
+
+        gdf = gpd.GeoDataFrame(
+            {"category": ["A", "B"]},
+            geometry=[poly1, poly2],
+            crs="EPSG:4326"
+        )
+
+        # Smooth with merge_collection=True but merge_field=None
+        # This should dissolve all geometries together
+        smoothed = smoothify(
+            geom=gdf,
+            segment_length=1.0,
+            smooth_iterations=3,
+            merge_collection=True,
+            merge_field=None,
+            num_cores=1
+        )
+
+        assert isinstance(smoothed, gpd.GeoDataFrame)
+        assert all(geom.is_valid for geom in smoothed.geometry)
+        # After dissolving all and exploding, we should have 1 or more geometries
+        assert len(smoothed) >= 1
+

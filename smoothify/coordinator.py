@@ -27,6 +27,7 @@ def smoothify(
     num_cores: int = 0,
     smooth_iterations: int = 3,
     merge_collection: bool = True,
+    merge_field: Optional[str] = None,
     merge_multipolygons: bool = True,
     preserve_area: bool = True,
     area_tolerance: float = 0.01,
@@ -40,6 +41,7 @@ def smoothify(
     num_cores: int = 0,
     smooth_iterations: int = 3,
     merge_collection: bool = True,
+    merge_field: None = None,
     merge_multipolygons: bool = True,
     preserve_area: bool = True,
     area_tolerance: float = 0.01,
@@ -53,6 +55,7 @@ def smoothify(
     num_cores: int = 0,
     smooth_iterations: int = 3,
     merge_collection: bool = True,
+    merge_field: None = None,
     merge_multipolygons: bool = True,
     preserve_area: bool = True,
     area_tolerance: float = 0.01,
@@ -65,6 +68,7 @@ def smoothify(
     num_cores: int = 0,
     smooth_iterations: int = 3,
     merge_collection: bool = True,
+    merge_field: Optional[str] = None,
     merge_multipolygons: bool = True,
     preserve_area: bool = True,
     area_tolerance: float = 0.01,
@@ -94,6 +98,8 @@ def smoothify(
             Higher values produce smoother results but add more vertices.
         merge_collection: Whether to merge/dissolve adjacent geometries in collections
             before smoothing. Useful for joining polygons from adjacent raster cells.
+        merge_field: Name of column to use for dissolving geometries in GeoDataFrames.
+            Only applies when merge_collection=True.
         merge_multipolygons: Whether to merge adjacent polygons within MultiPolygons
             before smoothing.
         preserve_area: Whether to restore original area after smoothing via buffering.
@@ -136,6 +142,16 @@ def smoothify(
     if segment_length is None:
         segment_length = _auto_detect_segment_length(geom)
 
+    if merge_field is not None:
+        if not isinstance(geom, gpd.GeoDataFrame):
+            raise ValueError("merge_field is only supported for GeoDataFrames.")
+        if merge_field not in geom.columns:
+            raise ValueError(f"merge_field {merge_field} not found in GeoDataFrame.")
+        if not merge_collection:
+            raise ValueError(
+                "merge_field is only supported when merge_collection is True."
+            )
+
     if isinstance(geom, GeometryCollection | MultiPolygon | MultiLineString):
         return _smoothify_bulk(
             geom=geom,
@@ -166,6 +182,7 @@ def smoothify(
             merge_multipolygons=merge_multipolygons,
             preserve_area=preserve_area,
             area_tolerance=area_tolerance,
+            merge_field=merge_field,
         )
     else:
         raise ValueError(
