@@ -1,8 +1,9 @@
 from functools import partial
-from multiprocessing.pool import Pool
+from multiprocessing import get_context
 from typing import Optional, Sequence, cast
 
 import geopandas as gpd
+import pandas as pd
 from joblib import Parallel, delayed
 from shapely.geometry import (
     GeometryCollection,
@@ -221,12 +222,29 @@ def _smoothify_geodataframe(
     modified_gdf = gdf.copy()
 
     if merge_collection:
-        modified_gdf.geometry = modified_gdf.buffer(segment_length / 1000)
-        modified_gdf = modified_gdf.dissolve(by=merge_field)
-        # Reset index to preserve the dissolve field as a column
-        if merge_field is not None:
-            modified_gdf = modified_gdf.reset_index()
-        modified_gdf = modified_gdf.explode(index_parts=False, ignore_index=True)
+        # Only merge polygons, not linestrings
+        # Separate polygons from other geometry types
+        polygon_mask = modified_gdf.geometry.geom_type.isin(['Polygon', 'MultiPolygon'])
+
+        if polygon_mask.any():
+            # Process polygons
+            polygon_gdf = modified_gdf[polygon_mask].copy()
+            polygon_gdf.geometry = polygon_gdf.buffer(segment_length / 1000)
+            polygon_gdf = polygon_gdf.dissolve(by=merge_field)
+            if merge_field is not None:
+                polygon_gdf = polygon_gdf.reset_index()
+            polygon_gdf = polygon_gdf.explode(index_parts=False, ignore_index=True)
+
+            # Combine with non-polygon geometries
+            if not polygon_mask.all():
+                other_gdf = modified_gdf[~polygon_mask].copy()
+                modified_gdf = gpd.GeoDataFrame(
+                    pd.concat([polygon_gdf, other_gdf], ignore_index=True),
+                    crs=gdf.crs
+                )
+            else:
+                modified_gdf = polygon_gdf
+        # If no polygons, leave modified_gdf as is
 
     smoothify_partial = partial(
         _smoothify_single,
@@ -355,7 +373,9 @@ def _smoothify_bulk(
     if num_cores == 1:
         geom_smoothed = list(map(smoothify_partial, geom.geoms))
     else:
-        with Pool(num_cores) as pool:
+        # Use spawn to avoid fork warnings in multi-threaded environments (Python 3.13+)
+        ctx = get_context("spawn")
+        with ctx.Pool(num_cores) as pool:
             geom_smoothed = pool.map(smoothify_partial, geom.geoms)
 
     if input_type == MultiPolygon:

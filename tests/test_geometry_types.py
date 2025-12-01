@@ -279,6 +279,123 @@ class TestGeoDataFrameTypes:
         assert list(smoothed["id"]) == [1, 2, 3, 4, 5]
         assert list(smoothed["name"]) == ["A", "B", "C", "D", "E"]
 
+    def test_geodataframe_linestrings_not_converted_to_polygons(self):
+        """Test that LineStrings are not converted to Polygons when merge_collection=True.
+
+        Regression test for bug where buffering operation in merge_collection
+        was being applied to all geometries including LineStrings, converting
+        them to Polygons.
+        """
+        # Create a GeoDataFrame with only LineStrings
+        lines = [
+            LineString([(i, i), (i + 5, i + 2), (i + 10, i + 5)]) for i in range(10)
+        ]
+        gdf = gpd.GeoDataFrame(geometry=lines)
+
+        # Smooth with merge_collection=True (default)
+        smoothed = smoothify(
+            gdf,
+            segment_length=1.0,
+            smooth_iterations=3,
+            num_cores=1,
+            merge_collection=True,
+        )
+
+        # All geometries should still be LineStrings, not Polygons
+        assert isinstance(smoothed, gpd.GeoDataFrame)
+        assert len(smoothed) == len(gdf)
+        assert all(isinstance(geom, LineString) for geom in smoothed.geometry)
+        assert all(geom.is_valid for geom in smoothed.geometry)
+
+    def test_geodataframe_mixed_types_merge_collection(self):
+        """Test GeoDataFrame with mixed Polygon and LineString types with merge_collection=True.
+
+        Ensures that merge_collection only applies buffering to Polygons,
+        not to LineStrings or other geometry types.
+        """
+        # Create mixed geometry types
+        polys = [Polygon([(i, i), (i + 5, i), (i + 5, i + 5), (i, i + 5)]) for i in range(5)]
+        lines = [LineString([(i + 20, i), (i + 25, i + 5)]) for i in range(5)]
+
+        gdf = gpd.GeoDataFrame(geometry=polys + lines)
+
+        # Smooth with merge_collection=True
+        smoothed = smoothify(
+            gdf,
+            segment_length=1.0,
+            smooth_iterations=3,
+            num_cores=1,
+            merge_collection=True,
+        )
+
+        assert isinstance(smoothed, gpd.GeoDataFrame)
+
+        # Check that geometry types are preserved
+        smoothed_types = smoothed.geometry.geom_type.value_counts()
+        assert 'Polygon' in smoothed_types or 'MultiPolygon' in smoothed_types
+        assert 'LineString' in smoothed_types
+
+        # Verify no LineStrings were converted to Polygons
+        for i, geom in enumerate(smoothed.geometry):
+            if i >= 5:  # These were originally LineStrings
+                assert isinstance(geom, LineString), f"LineString at index {i} was converted to {type(geom)}"
+
+    def test_geodataframe_mixed_all_geometry_types_merge_collection(self):
+        """Test GeoDataFrame with all supported mixed types with merge_collection=True.
+
+        Tests Polygon, MultiPolygon, LineString, and MultiLineString together
+        to ensure merge_collection correctly handles all combinations.
+        Note: merge_collection can change row counts due to dissolve/explode operations.
+        """
+        # Create diverse mixed geometry types
+        poly1 = Polygon([(0, 0), (5, 0), (5, 5), (0, 5)])
+        poly2 = Polygon([(10, 10), (15, 10), (15, 15), (10, 15)])
+        multi_poly = MultiPolygon([
+            Polygon([(20, 20), (25, 20), (25, 25), (20, 25)]),
+            Polygon([(30, 30), (35, 30), (35, 35), (30, 35)])
+        ])
+        line1 = LineString([(40, 40), (45, 45), (50, 40)])
+        line2 = LineString([(60, 60), (65, 65)])
+        multi_line = MultiLineString([
+            LineString([(70, 70), (75, 75)]),
+            LineString([(80, 80), (85, 85)])
+        ])
+
+        gdf = gpd.GeoDataFrame(
+            geometry=[poly1, poly2, multi_poly, line1, line2, multi_line]
+        )
+
+        # Count original line-based geometries
+        original_linestring_count = sum(1 for gt in gdf.geometry.geom_type if 'LineString' in gt)
+
+        # Smooth with merge_collection=True
+        smoothed = smoothify(
+            gdf,
+            segment_length=1.0,
+            smooth_iterations=3,
+            num_cores=1,
+            merge_collection=True,
+        )
+
+        assert isinstance(smoothed, gpd.GeoDataFrame)
+        assert all(geom.is_valid for geom in smoothed.geometry)
+
+        # Verify all LineString and MultiLineString geometries were preserved (not converted to Polygons)
+        smoothed_types = smoothed.geometry.geom_type.value_counts()
+
+        # Should have both Polygon/MultiPolygon types and LineString/MultiLineString types
+        has_polygon = 'Polygon' in smoothed_types or 'MultiPolygon' in smoothed_types
+        has_linestring = 'LineString' in smoothed_types or 'MultiLineString' in smoothed_types
+
+        assert has_polygon, "Expected to find Polygon or MultiPolygon geometries"
+        assert has_linestring, "Expected to find LineString or MultiLineString geometries"
+
+        # Count line-based geometries in result - should match original count
+        # (LineStrings and MultiLineStrings should not be merged or exploded)
+        smoothed_linestring_count = sum(1 for gt in smoothed.geometry.geom_type if 'LineString' in gt)
+        assert smoothed_linestring_count == original_linestring_count, \
+            f"LineString count changed from {original_linestring_count} to {smoothed_linestring_count}"
+
 
 class TestParameterRobustness:
     """Test robustness to different parameter values."""

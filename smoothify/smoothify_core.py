@@ -216,7 +216,10 @@ def _join_adjacent(
     Applies a tiny buffer (segment_length / 1000) to join geometries that are nearly
     touching or share edges, then unions them together into a single geometry or
     collection. This is useful for merging polygons derived from adjacent raster
-    cells with the same classification."""
+    cells with the same classification.
+
+    Note: Only applies to Polygon and MultiPolygon geometries. Other geometry types
+    (LineString, LinearRing, etc.) are returned unchanged."""
 
     if isinstance(geom, list):
         geom_combined = unary_union(geom)
@@ -231,6 +234,9 @@ def _join_adjacent(
             else:
                 other_types.append(geom)
         geom_combined = GeometryCollection(poly_types)
+    elif not isinstance(geom_combined, Polygon | MultiPolygon):
+        # If the geometry is not a polygon type, return it unchanged
+        return geom_combined
 
     merged_geom = geom_combined.buffer(segment_length / 1000)
     merged_geom = unary_union(merged_geom)
